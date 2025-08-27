@@ -1,75 +1,135 @@
-
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import { type Station } from "@/types";
 import { metroLines, stations } from "./delhi-metro-data";
+import { getDistance } from 'geolib';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function haversineDistance(
-  coords1: { latitude: number; longitude: number },
-  coords2: { lat: number; lng: number }
-): number {
-  const toRad = (x: number) => (x * Math.PI) / 180;
+export function findNearestStation(
+  userCoords: { latitude: number; longitude: number }
+): Station | null {
+  const allStations = Object.values(stations);
+  if (allStations.length === 0) {
+    return null;
+  }
 
-  const R = 6371; // Earth radius in km
-  const dLat = toRad(coords2.lat - coords1.latitude);
-  const dLon = toRad(coords2.lng - coords1.longitude);
-  const lat1 = toRad(coords1.latitude);
-  const lat2 = toRad(coords2.lat);
+  let closestStation: Station | null = null;
+  let minDistance = Infinity;
 
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.sin(dLon / 2) * Math.sin(dLon / 2) * Math.cos(lat1) * Math.cos(lat2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const d = R * c;
+  for (const station of allStations) {
+    const distance = getDistance(userCoords, {
+      latitude: station.coordinates.lat,
+      longitude: station.coordinates.lng,
+    });
 
-  return d;
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestStation = station;
+    }
+  }
+  return closestStation;
 }
 
-
-// A simple BFS pathfinding algorithm to find a route between two stations
 export function findJourneyRoute(startStationId: string, endStationId: string): Station[] | null {
-  const queue: string[][] = [[startStationId]];
-  const visited = new Set<string>([startStationId]);
+  if (!startStationId || !endStationId || !stations[startStationId] || !stations[endStationId]) {
+    return null;
+  }
 
-  while (queue.length > 0) {
-    const path = queue.shift()!;
-    const currentStationId = path[path.length - 1];
+  // --- Graph Construction ---
+  const graph: { [key: string]: string[] } = {};
+  const allStationIds = Object.keys(stations);
 
-    if (currentStationId === endStationId) {
-      return path.map(id => stations[id]);
+  // Initialize graph
+  allStationIds.forEach(id => {
+    graph[id] = [];
+  });
+
+  // 1. Add connections within each line
+  for (const line of metroLines) {
+    for (let i = 0; i < line.stations.length; i++) {
+      const currentStationId = line.stations[i];
+      if (i > 0) {
+        graph[currentStationId].push(line.stations[i - 1]);
+      }
+      if (i < line.stations.length - 1) {
+        graph[currentStationId].push(line.stations[i + 1]);
+      }
     }
-    
-    const currentStation = stations[currentStationId];
-    if (!currentStation) continue;
-    
-    // Find all metro lines that pass through the current station
-    const linesThroughStation = metroLines.filter(line => line.stations.includes(currentStationId));
+  }
 
-    for (const line of linesThroughStation) {
-      const stationIndex = line.stations.indexOf(currentStationId);
+  // 2. Add interchange connections
+  const interchangeGroups: { [key: string]: string[] } = {};
+  for (const stationId of allStationIds) {
+    const station = stations[stationId];
+    if (!interchangeGroups[station.name]) {
+      interchangeGroups[station.name] = [];
+    }
+    interchangeGroups[station.name].push(station.id);
+  }
 
-      // Check neighbors on the same line
-      const neighbors = [];
-      if (stationIndex > 0) {
-        neighbors.push(line.stations[stationIndex - 1]);
-      }
-      if (stationIndex < line.stations.length - 1) {
-        neighbors.push(line.stations[stationIndex + 1]);
-      }
-
-      for (const neighborId of neighbors) {
-        if (!visited.has(neighborId)) {
-          visited.add(neighborId);
-          const newPath = [...path, neighborId];
-          queue.push(newPath);
+  for (const name in interchangeGroups) {
+    const stationIdsInGroup = interchangeGroups[name];
+    if (stationIdsInGroup.length > 1) {
+      for (let i = 0; i < stationIdsInGroup.length; i++) {
+        for (let j = i + 1; j < stationIdsInGroup.length; j++) {
+          const id1 = stationIdsInGroup[i];
+          const id2 = stationIdsInGroup[j];
+          graph[id1].push(id2);
+          graph[id2].push(id1);
         }
       }
     }
   }
 
-  return null; // No path found
+  // --- BFS Pathfinding ---
+  const queue: { stationId: string; path: string[] }[] = [{ stationId: startStationId, path: [startStationId] }];
+  const visited = new Set<string>([startStationId]);
+
+  while (queue.length > 0) {
+    const { stationId: currentStationId, path } = queue.shift()!;
+
+    if (currentStationId === endStationId) {
+      return path.map(id => stations[id]);
+    }
+
+    const neighbors = graph[currentStationId] || [];
+    for (const neighborId of neighbors) {
+      if (!visited.has(neighborId)) {
+        visited.add(neighborId);
+        const newPath = [...path, neighborId];
+        queue.push({ stationId: neighborId, path: newPath });
+      }
+    }
+  }
+
+  return null; // Path not found
+}
+
+
+export function findNearestStationOnRoute(
+  userCoords: { latitude: number; longitude: number },
+  route: Station[]
+): Station | null {
+  if (!route || route.length === 0) {
+    return null;
+  }
+
+  let closestStation: Station | null = null;
+  let minDistance = Infinity;
+
+  for (const station of route) {
+    const distance = getDistance(userCoords, {
+      latitude: station.coordinates.lat,
+      longitude: station.coordinates.lng,
+    });
+
+    if (distance < minDistance) {
+      minDistance = distance;
+      closestStation = station;
+    }
+  }
+  return closestStation;
 }

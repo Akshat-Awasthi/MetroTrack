@@ -1,12 +1,11 @@
-
 "use client";
 
 import * as React from "react";
-import { ArrowRight, Compass, LoaderCircle, MapPin, Search, Train, Wind } from "lucide-react";
+import { ArrowRight, Compass, LoaderCircle, MapPin, Search, Train, Wind, LocateFixed, ZoomIn, ZoomOut, ArrowLeftRight } from "lucide-react";
 
 import { useGeolocation } from "@/hooks/use-geolocation";
-import { type Station, type MetroLine, metroLines, stations } from "@/lib/delhi-metro-data";
-import { haversineDistance, findJourneyRoute } from "@/lib/utils";
+import {metroLines, stations } from "@/lib/delhi-metro-data";
+import { findNearestStation, findJourneyRoute } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetDescription } from "@/components/ui/sheet";
@@ -16,6 +15,7 @@ import { JourneyTracker } from "@/components/journey-tracker";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { StationCombobox } from "@/components/station-combobox";
+import { Station } from "@/types";
 
 
 const MAP_BOUNDS = {
@@ -46,6 +46,7 @@ export default function Home() {
   const [journey, setJourney] = React.useState<{ from: Station; to: Station; route: Station[] } | null>(null);
   
   // Map interaction state
+  const mapRef = React.useRef<HTMLDivElement>(null);
   const [scale, setScale] = React.useState(1);
   const [translate, setTranslate] = React.useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = React.useState(false);
@@ -57,18 +58,10 @@ export default function Home() {
 
   React.useEffect(() => {
     if (position) {
-      let minDistance = Infinity;
-      let nearestStation: Station | null = null;
-      for (const station of stationEntries) {
-        const distance = haversineDistance(position.coords, station.coordinates);
-        if (distance < minDistance) {
-          minDistance = distance;
-          nearestStation = station;
-        }
-      }
+      const nearestStation = findNearestStation(position.coords);
       setClosestStation(nearestStation);
     }
-  }, [position, stationEntries]);
+  }, [position]);
 
   const handleStartJourney = () => {
     if (fromStationId && toStationId) {
@@ -90,22 +83,43 @@ export default function Home() {
     }
   };
 
+  const handleSwapStations = () => {
+    setFromStationId(toStationId);
+    setToStationId(fromStationId);
+  };
+  
   const handleEndJourney = () => {
     setJourney(null);
     setFromStationId(null);
     setToStationId(null);
   };
   
+  const handleZoom = (zoomFactor: number, clientX?: number, clientY?: number) => {
+    if (!mapRef.current) return;
+  
+    const newScale = Math.max(0.5, Math.min(scale * zoomFactor, 5));
+    if (newScale === scale) return;
+  
+    const mapRect = mapRef.current.getBoundingClientRect();
+    const mouseX = (clientX ?? mapRect.width / 2) - mapRect.left;
+    const mouseY = (clientY ?? mapRect.height / 2) - mapRect.top;
+  
+    // Position of the mouse on the map before zoom
+    const mapMouseX = (mouseX - translate.x) / scale;
+    const mapMouseY = (mouseY - translate.y) / scale;
+  
+    // New translate to keep the mouse position fixed
+    const newTranslateX = mouseX - mapMouseX * newScale;
+    const newTranslateY = mouseY - mapMouseY * newScale;
+  
+    setScale(newScale);
+    setTranslate({ x: newTranslateX, y: newTranslateY });
+  };
+
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
     e.preventDefault();
-    const zoomFactor = 1.1;
-    if (e.deltaY < 0) {
-      // Zoom in
-      setScale(prev => Math.min(prev * zoomFactor, 5));
-    } else {
-      // Zoom out
-      setScale(prev => Math.max(prev / zoomFactor, 0.5));
-    }
+    const zoomFactor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    handleZoom(zoomFactor, e.clientX, e.clientY);
   };
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -127,54 +141,105 @@ export default function Home() {
     setIsDragging(false);
      e.currentTarget.style.cursor = 'grab';
   };
+
+  const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 1) {
+      setIsDragging(true);
+      setStartDrag({ x: e.touches[0].clientX - translate.x, y: e.touches[0].clientY - translate.y });
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (isDragging && e.touches.length === 1) {
+      setTranslate({
+        x: e.touches[0].clientX - startDrag.x,
+        y: e.touches[0].clientY - startDrag.y
+      });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    setIsDragging(false);
+  };
+  
+  const centerOnUser = () => {
+    if (userMapPos) {
+      setScale(2); // Zoom in a bit
+      setTranslate({
+        x: -userMapPos.x * 2 + MAP_DIMENSIONS.width / 2,
+        y: -userMapPos.y * 2 + MAP_DIMENSIONS.height / 2,
+      });
+    }
+  };
   
   const userMapPos = position ? toMapCoords(position.coords.latitude, position.coords.longitude) : null;
   
   return (
-    <main className="h-[100dvh] w-screen flex flex-col bg-gray-100 dark:bg-gray-900">
-      <header className="flex items-center justify-between p-4 bg-background border-b shadow-sm z-10">
+    <main className="h-[100dvh] w-screen flex flex-col bg-gray-50 dark:bg-gray-950">
+      <header className="flex items-center justify-between p-3 bg-background/80 backdrop-blur-sm border-b shadow-sm z-10">
         <div className="flex items-center gap-2">
           <MetroTrackLogo className="h-8 w-8 text-primary" />
-          <h1 className="text-xl font-bold font-headline text-primary">MetroTrack Delhi</h1>
+          <h1 className="text-xl font-bold tracking-tight text-primary">MetroTrack</h1>
         </div>
-        <Sheet>
-          <SheetTrigger asChild>
-            <Button variant="ghost" size="icon">
-              <Search className="h-5 w-5" />
+        <div className="flex items-center gap-2">
+          {position && (
+             <Button variant="outline" size="icon" onClick={centerOnUser}>
+              <LocateFixed className="h-5 w-5" />
             </Button>
-          </SheetTrigger>
-          <SheetContent side="right">
-            <SheetHeader>
-              <SheetTitle>Amenity Locator</SheetTitle>
-              <SheetDescription>
-                Find restrooms, ATMs, and more at your station.
-              </SheetDescription>
-            </SheetHeader>
-            <AmenityFinder />
-          </SheetContent>
-        </Sheet>
+          )}
+          <Sheet>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="icon">
+                <Search className="h-5 w-5" />
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right">
+              <SheetHeader>
+                <SheetTitle>Amenity Locator</SheetTitle>
+                <SheetDescription>
+                  Find restrooms, ATMs, and more at your station.
+                </SheetDescription>
+              </SheetHeader>
+              <AmenityFinder />
+            </SheetContent>
+          </Sheet>
+        </div>
       </header>
 
       <div 
+        ref={mapRef}
         className="flex-1 relative overflow-hidden cursor-grab"
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
          <div className="absolute inset-0 grid grid-cols-10 grid-rows-10">
             {[...Array(100)].map((_, i) => (
-                <div key={i} className="border border-gray-200 dark:border-gray-800"></div>
+                <div key={i} className="border border-black/5 dark:border-white/5"></div>
             ))}
+         </div>
+         
+         <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-2">
+            <Button variant="outline" size="icon" onClick={() => handleZoom(1.2)}>
+                <ZoomIn className="h-5 w-5" />
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => handleZoom(1/1.2)}>
+                <ZoomOut className="h-5 w-5" />
+            </Button>
          </div>
         
         <div
-          className="absolute top-1/2 left-1/2 transition-transform duration-100 ease-linear"
+          className="absolute top-0 left-0"
           style={{ 
             width: MAP_DIMENSIONS.width, 
             height: MAP_DIMENSIONS.height,
-            transform: `translate(-50%, -50%) translate(${translate.x}px, ${translate.y}px) scale(${scale})`
+            transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
+            transformOrigin: 'top left'
           }}
         >
           <svg
@@ -215,18 +280,28 @@ export default function Home() {
                    <circle
                     cx={x}
                     cy={y}
-                    r={isClosest || isJourneyEndpoint ? "6" : "4"}
-                    fill={isClosest || isJourneyEndpoint ? "hsl(var(--accent))" : "white"}
-                    stroke="hsl(var(--primary))"
-                    strokeWidth="1.5"
+                    r={isClosest || isJourneyEndpoint ? "5" : "3"}
+                    fill={isClosest || isJourneyEndpoint ? "hsl(var(--primary))" : "hsl(var(--background))"}
+                    stroke="hsl(var(--foreground))"
+                    strokeWidth="1"
                   />
+                   <text
+                      x={x}
+                      y={y + 8}
+                      textAnchor="middle"
+                      fontSize="4"
+                      fill="hsl(var(--foreground))"
+                      className="font-sans"
+                    >
+                      {station.name}
+                    </text>
                 </g>
               );
             })}
             
             {userMapPos && (
                <g transform={`translate(${userMapPos.x}, ${userMapPos.y})`}>
-                  <circle cx="0" cy="0" r="6" fill="hsl(var(--primary))" />
+                  <circle cx="0" cy="0" r="6" fill="hsl(var(--primary))" opacity="0.8"/>
                   <circle cx="0" cy="0" r="6" fill="hsl(var(--primary))" stroke="hsl(var(--primary))" strokeWidth="2" strokeOpacity="0.5">
                       <animate attributeName="r" from="6" to="12" dur="1s" begin="0s" repeatCount="indefinite" />
                       <animate attributeName="opacity" from="1" to="0" dur="1s" begin="0s" repeatCount="indefinite" />
@@ -241,10 +316,11 @@ export default function Home() {
         <SheetContent 
           side="bottom" 
           hideCloseButton 
-          className={journey ? "h-[90vh] rounded-t-lg" : "h-auto max-h-[50vh] rounded-t-lg"}
+          className={journey ? "h-[90dvh] rounded-t-lg" : "h-auto max-h-[50dvh] rounded-t-lg"}
         >
-          <SheetHeader className="pt-4">
-             <SheetTitle className="text-center font-headline">
+          <SheetHeader className="pt-4 text-center">
+             <div className="mx-auto h-1.5 w-12 rounded-full bg-muted-foreground/20 mb-2"></div>
+             <SheetTitle className="font-headline">
                 {journey ? "Journey Details" : "Plan Your Journey"}
              </SheetTitle>
           </SheetHeader>
@@ -252,13 +328,16 @@ export default function Home() {
             {!journey ? (
               // Journey Selection UI
               <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
+                <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
                     <StationCombobox
                       stations={sortedStations}
                       value={fromStationId}
                       onSelect={setFromStationId}
                       placeholder="From Station"
                     />
+                    <Button variant="ghost" size="icon" onClick={handleSwapStations} disabled={!fromStationId && !toStationId}>
+                        <ArrowLeftRight className="h-4 w-4" />
+                    </Button>
                     <StationCombobox
                       stations={sortedStations.filter(s => s.id !== fromStationId)}
                       value={toStationId}
@@ -306,7 +385,7 @@ export default function Home() {
                  <ScrollArea className="flex-1">
                    <JourneyTracker 
                     route={journey.route}
-                    closestStation={closestStation}
+                    currentLocation={position ? position.coords : null}
                    />
                  </ScrollArea>
                 
