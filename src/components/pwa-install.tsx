@@ -1,3 +1,5 @@
+"use client";
+
 import React, { useEffect, useState } from 'react';
 
 const isMobile = () => typeof window !== 'undefined' && window.innerWidth <= 768;
