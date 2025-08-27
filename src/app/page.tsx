@@ -1,14 +1,15 @@
+
 "use client";
 
 import * as React from "react";
-import { ArrowRight, Compass, LoaderCircle, MapPin, Search, Train, Wind, LocateFixed, ZoomIn, ZoomOut, ArrowLeftRight } from "lucide-react";
+import { ArrowRight, Compass, LoaderCircle, MapPin, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair } from "lucide-react";
 
 import { useGeolocation } from "@/hooks/use-geolocation";
-import {metroLines, stations } from "@/lib/delhi-metro-data";
-import { findNearestStation, findJourneyRoute } from "@/lib/utils";
+import { metroLines, stations } from "@/lib/delhi-metro-data";
+import { findNearestStation, findJourneyRoute, cn, findNearestStationOnRoute } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetDescription } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import { MetroTrackLogo } from "@/components/icons";
 import { AmenityFinder } from "@/components/amenity-finder";
 import { JourneyTracker } from "@/components/journey-tracker";
@@ -16,23 +17,29 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 import { StationCombobox } from "@/components/station-combobox";
 import { Station } from "@/types";
+import { useJourneyNotifications } from "@/hooks/use-journey-notifications";
 
 
 const MAP_BOUNDS = {
-  minLat: 28.4,
-  maxLat: 28.8,
-  minLng: 77.0,
-  maxLng: 77.4,
+  minLat: 28.35,
+  maxLat: 28.9,
+  minLng: 76.8,
+  maxLng: 77.6,
 };
 
 const MAP_DIMENSIONS = {
-  width: 800,
-  height: 800,
+  width: 2500,
+  height: 1500,
 };
 
 const toMapCoords = (lat: number, lng: number) => {
-  const x = ((lng - MAP_BOUNDS.minLng) / (MAP_BOUNDS.maxLng - MAP_BOUNDS.minLng)) * MAP_DIMENSIONS.width;
-  const y = ((MAP_BOUNDS.maxLat - lat) / (MAP_BOUNDS.maxLat - MAP_BOUNDS.minLat)) * MAP_DIMENSIONS.height;
+  const PADDING = 0.05; // 5% padding
+  const effectiveWidth = MAP_DIMENSIONS.width * (1 - 2 * PADDING);
+  const effectiveHeight = MAP_DIMENSIONS.height * (1 - 2 * PADDING);
+  
+  const x = (paddingX => paddingX + ((lng - MAP_BOUNDS.minLng) / (MAP_BOUNDS.maxLng - MAP_BOUNDS.minLng)) * effectiveWidth)(MAP_DIMENSIONS.width * PADDING);
+  const y = (paddingY => paddingY + ((MAP_BOUNDS.maxLat - lat) / (MAP_BOUNDS.maxLat - MAP_BOUNDS.minLat)) * effectiveHeight)(MAP_DIMENSIONS.height * PADDING);
+  
   return { x, y };
 };
 
@@ -45,10 +52,13 @@ export default function Home() {
   const [toStationId, setToStationId] = React.useState<string | null>(null);
   const [journey, setJourney] = React.useState<{ from: Station; to: Station; route: Station[] } | null>(null);
   
+  // Location intent state
+  const [isWaitingForLocationToSetFrom, setIsWaitingForLocationToSetFrom] = React.useState(false);
+
   // Map interaction state
   const mapRef = React.useRef<HTMLDivElement>(null);
-  const [scale, setScale] = React.useState(1);
-  const [translate, setTranslate] = React.useState({ x: 0, y: 0 });
+  const [scale, setScale] = React.useState(0.8);
+  const [translate, setTranslate] = React.useState({ x: -200, y: -100 });
   const [isDragging, setIsDragging] = React.useState(false);
   const [startDrag, setStartDrag] = React.useState({ x: 0, y: 0 });
 
@@ -56,17 +66,48 @@ export default function Home() {
   const stationEntries = React.useMemo(() => Object.values(stations), []);
   const sortedStations = React.useMemo(() => [...stationEntries].sort((a, b) => a.name.localeCompare(b.name)), [stationEntries]);
 
+  // Handle Notifications
+  const closestStationOnRoute = position && journey ? findNearestStationOnRoute(position.coords, journey.route) : null;
+  useJourneyNotifications(journey?.route || null, closestStationOnRoute);
+
+
   React.useEffect(() => {
     if (position) {
       const nearestStation = findNearestStation(position.coords);
       setClosestStation(nearestStation);
+      
+      if (isWaitingForLocationToSetFrom && nearestStation) {
+        setFromStationId(nearestStation.id);
+        setIsWaitingForLocationToSetFrom(false);
+      }
     }
-  }, [position]);
-
-  const handleStartJourney = () => {
+  }, [position, isWaitingForLocationToSetFrom]);
+  
+  const handleSetNearestStationAsFrom = () => {
+    if (position && closestStation) {
+      setFromStationId(closestStation.id);
+    } else if (error) {
+      toast({
+        variant: "destructive",
+        title: "Location Error",
+        description: error || "Could not determine your location. Please ensure location services are enabled.",
+      });
+    } else {
+      setIsWaitingForLocationToSetFrom(true);
+      toast({
+        title: "Locating...",
+        description: "Waiting for GPS signal to set the nearest station.",
+      });
+    }
+  };
+  
+  const handleStartJourney = async () => {
     if (fromStationId && toStationId) {
        const route = findJourneyRoute(fromStationId, toStationId);
        if(route && route.length > 0) {
+         if ('Notification' in window && Notification.permission !== 'denied') {
+            await Notification.requestPermission();
+         }
          setJourney({
            from: stations[fromStationId],
            to: stations[toStationId],
@@ -163,12 +204,15 @@ export default function Home() {
   };
   
   const centerOnUser = () => {
-    if (userMapPos) {
-      setScale(2); // Zoom in a bit
-      setTranslate({
-        x: -userMapPos.x * 2 + MAP_DIMENSIONS.width / 2,
-        y: -userMapPos.y * 2 + MAP_DIMENSIONS.height / 2,
-      });
+    if (userMapPos && mapRef.current) {
+        const mapWidth = mapRef.current.clientWidth;
+        const mapHeight = mapRef.current.clientHeight;
+        const newScale = 2; // Zoom in a bit
+        setScale(newScale);
+        setTranslate({
+            x: -userMapPos.x * newScale + mapWidth / 2,
+            y: -userMapPos.y * newScale + mapHeight / 2,
+        });
     }
   };
   
@@ -218,9 +262,9 @@ export default function Home() {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-         <div className="absolute inset-0 grid grid-cols-10 grid-rows-10">
-            {[...Array(100)].map((_, i) => (
-                <div key={i} className="border border-black/5 dark:border-white/5"></div>
+         <div className="absolute inset-0 grid grid-cols-20 grid-rows-12">
+            {[...Array(240)].map((_, i) => (
+                <div key={i} className="border border-border/10"></div>
             ))}
          </div>
          
@@ -274,9 +318,19 @@ export default function Home() {
               const { x, y } = toMapCoords(station.coordinates.lat, station.coordinates.lng);
               const isClosest = closestStation?.id === station.id;
               const isJourneyEndpoint = journey?.from.id === station.id || journey?.to.id === station.id;
+              const isPartOfJourney = journey?.route.some(s => s.id === station.id);
               
+              const baseFontSize = 7;
+              const maxFontSize = 10;
+              const minFontSize = 4;
+              const fontSize = Math.max(minFontSize, Math.min(maxFontSize, baseFontSize / scale));
+
+
               return (
-                <g key={station.id}>
+                <g key={station.id} className={cn(
+                  "transition-opacity", 
+                  !journey || isPartOfJourney ? "opacity-100" : "opacity-30"
+                )}>
                    <circle
                     cx={x}
                     cy={y}
@@ -286,12 +340,11 @@ export default function Home() {
                     strokeWidth="1"
                   />
                    <text
-                      x={x}
-                      y={y + 8}
-                      textAnchor="middle"
-                      fontSize="4"
-                      fill="hsl(var(--foreground))"
-                      className="font-sans"
+                      x={x + 4}
+                      y={y + 4}
+                      textAnchor="start"
+                      fontSize={`${fontSize}px`}
+                      className="font-sans font-medium fill-foreground"
                     >
                       {station.name}
                     </text>
@@ -316,28 +369,38 @@ export default function Home() {
         <SheetContent 
           side="bottom" 
           hideCloseButton 
-          className={journey ? "h-[90dvh] rounded-t-lg" : "h-auto max-h-[50dvh] rounded-t-lg"}
+          className={cn("rounded-t-lg transition-all duration-300 p-0",
+            journey ? "h-[85dvh]" : "h-auto max-h-[60dvh]"
+          )}
         >
-          <SheetHeader className="pt-4 text-center">
-             <div className="mx-auto h-1.5 w-12 rounded-full bg-muted-foreground/20 mb-2"></div>
-             <SheetTitle className="font-headline">
+          <SheetHeader className="p-4 pt-2 text-center">
+             <div className="mx-auto h-1.5 w-12 rounded-full bg-muted-foreground/20 mb-2 cursor-grab active:cursor-grabbing"></div>
+             <SheetTitle className="font-headline text-lg sm:text-xl">
                 {journey ? "Journey Details" : "Plan Your Journey"}
              </SheetTitle>
           </SheetHeader>
-          <div className="p-4 overflow-y-auto h-full">
+          <div className="overflow-y-auto h-full pb-4">
             {!journey ? (
               // Journey Selection UI
-              <div className="space-y-4">
-                <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center">
+              <div className="px-4 space-y-4">
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <div className="flex-1 flex gap-2 items-center">
                     <StationCombobox
                       stations={sortedStations}
                       value={fromStationId}
                       onSelect={setFromStationId}
                       placeholder="From Station"
                     />
-                    <Button variant="ghost" size="icon" onClick={handleSwapStations} disabled={!fromStationId && !toStationId}>
+                     <Button variant="outline" size="icon" className="shrink-0" onClick={handleSetNearestStationAsFrom} disabled={isWaitingForLocationToSetFrom}>
+                      {isWaitingForLocationToSetFrom ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Crosshair className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <div className="sm:self-center">
+                    <Button variant="ghost" size="icon" className="hidden sm:flex" onClick={handleSwapStations} disabled={!fromStationId && !toStationId}>
                         <ArrowLeftRight className="h-4 w-4" />
                     </Button>
+                  </div>
+                  <div className="flex-1">
                     <StationCombobox
                       stations={sortedStations.filter(s => s.id !== fromStationId)}
                       value={toStationId}
@@ -345,12 +408,13 @@ export default function Home() {
                       placeholder="To Station"
                       disabled={!fromStationId}
                     />
+                  </div>
                 </div>
                 <Button className="w-full" onClick={handleStartJourney} disabled={!fromStationId || !toStationId}>
                     <Train className="mr-2 h-4 w-4" />
                     Start Journey
                 </Button>
-                 {!position && !error && (
+                 {!position && !error && !isWaitingForLocationToSetFrom && (
                     <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-4">
                       <LoaderCircle className="animate-spin h-8 w-8 mb-4" />
                       <p>Acquiring GPS signal...</p>
@@ -362,36 +426,39 @@ export default function Home() {
                      <div className="flex flex-col items-center justify-center h-full text-destructive py-4">
                        <Compass className="h-8 w-8 mb-4" />
                        <p className="font-semibold">{error}</p>
+                       <p className="text-xs mt-1 text-center">Please grant location permissions and ensure your GPS is enabled.</p>
                     </div>
                   )}
               </div>
             ) : (
                // Journey Tracking UI
-               <div className="space-y-4 flex flex-col h-[calc(100%-4rem)]">
-                 <Card>
-                    <CardContent className="p-4 flex items-center justify-between">
-                        <div className="text-center">
+               <div className="space-y-4 flex flex-col h-full">
+                 <Card className="mx-4">
+                    <CardContent className="p-3 sm:p-4 flex items-center justify-between text-center">
+                        <div className="flex-1">
                             <p className="text-xs text-muted-foreground">From</p>
-                            <p className="font-bold">{journey.from.name}</p>
+                            <p className="font-bold text-sm sm:text-base truncate">{journey.from.name}</p>
                         </div>
-                        <ArrowRight className="h-5 w-5 text-primary" />
-                        <div className="text-center">
+                        <ArrowRight className="h-5 w-5 text-primary mx-2 shrink-0" />
+                        <div className="flex-1">
                             <p className="text-xs text-muted-foreground">To</p>
-                            <p className="font-bold">{journey.to.name}</p>
+                            <p className="font-bold text-sm sm:text-base truncate">{journey.to.name}</p>
                         </div>
                     </CardContent>
                  </Card>
 
-                 <ScrollArea className="flex-1">
+                 <ScrollArea className="flex-1 px-2">
                    <JourneyTracker 
                     route={journey.route}
                     currentLocation={position ? position.coords : null}
                    />
                  </ScrollArea>
                 
-                 <Button variant="destructive" className="w-full" onClick={handleEndJourney}>
-                    End Journey
-                 </Button>
+                 <div className="px-4 pt-2 border-t">
+                    <Button variant="destructive" className="w-full" onClick={handleEndJourney}>
+                        End Journey
+                    </Button>
+                 </div>
                </div>
             )}
           </div>
@@ -400,3 +467,8 @@ export default function Home() {
     </main>
   );
 }
+
+    
+
+    
+

@@ -11,7 +11,7 @@ const PWAInstallBanner: React.FC = () => {
   useEffect(() => {
     // Register service worker
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/service-worker.js');
+      navigator.serviceWorker.register('/sw.js');
     }
 
     // Listen for install prompt
