@@ -1,7 +1,7 @@
-
 import type { Metadata } from 'next';
 import './globals.css';
 import { Toaster } from "@/components/ui/toaster";
+import PWAInstallBanner from '@/components/pwa-install';
 
 export const metadata: Metadata = {
   title: 'MetroTrack Delhi',
@@ -23,6 +23,7 @@ export default function RootLayout({
         <meta name="theme-color" content="#1E88E5" />
       </head>
       <body className="font-body antialiased">
+        <PWAInstallBanner />
         {children}
         <Toaster />
       </body>
