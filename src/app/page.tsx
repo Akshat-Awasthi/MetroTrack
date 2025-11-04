@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowLeft, ArrowRight, Compass, LoaderCircle, MapPin, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair } from "lucide-react";
+import { ArrowLeft, ArrowRight, Compass, LoaderCircle, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair } from "lucide-react";
 
 import { useGeolocation } from "@/hooks/use-geolocation";
 import { metroLines, stations } from "@/lib/delhi-metro-data";
