@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowRight, Compass, LoaderCircle, MapPin, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair } from "lucide-react";
+import { ArrowLeft, ArrowRight, Compass, LoaderCircle, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair } from "lucide-react";
 
 import { useGeolocation } from "@/hooks/use-geolocation";
 import { metroLines, stations } from "@/lib/delhi-metro-data";
@@ -163,6 +163,11 @@ export default function Home() {
     setJourney(null);
     setFromStationId(null);
     setToStationId(null);
+  };
+
+  // Go back to the planning UI but keep the from/to selections
+  const handleBackToPlan = () => {
+    setJourney(null);
   };
   
   const handleZoom = (zoomFactor: number, clientX?: number, clientY?: number) => {
@@ -403,18 +408,25 @@ export default function Home() {
             journey ? "h-[85dvh]" : "h-auto max-h-[60dvh]"
           )}
         >
-          <SheetHeader className="p-4 pt-2 text-center">
-             <div className="mx-auto h-1.5 w-12 rounded-full bg-muted-foreground/20 mb-2 cursor-grab active:cursor-grabbing"></div>
-             <SheetTitle className="font-headline text-lg sm:text-xl">
-                {journey ? "Journey Details" : "Plan Your Journey"}
-             </SheetTitle>
-          </SheetHeader>
+       <SheetHeader className="p-4 pt-2 text-center relative">
+         <div className="mx-auto h-1.5 w-12 rounded-full bg-muted-foreground/20 mb-2 cursor-grab active:cursor-grabbing"></div>
+         {journey && (
+          <div className="absolute left-4 top-4">
+            <Button variant="ghost" size="icon" onClick={handleBackToPlan}>
+             <ArrowLeft className="h-5 w-5" />
+            </Button>
+          </div>
+         )}
+         <SheetTitle className="font-headline text-lg sm:text-xl text-center">
+           {journey ? "Journey Details" : "Plan Your Journey"}
+         </SheetTitle>
+       </SheetHeader>
           <div className="overflow-y-auto h-full pb-4">
             {!journey ? (
               // Journey Selection UI
               <div className="px-4 space-y-4">
                 <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="flex-1 flex gap-2 items-center">
+                  <div className="flex-1 flex gap-2 items-center pt-1">
                     <StationCombobox
                       stations={sortedStations}
                       value={fromStationId}
