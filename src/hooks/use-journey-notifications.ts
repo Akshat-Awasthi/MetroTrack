@@ -40,7 +40,7 @@ async function showNotification(
       };
 
       if (registration && typeof registration.showNotification === 'function') {
-        registration.showNotification(title, notificationOptions as any);
+        await registration.showNotification(title, options as any);
         return;
       }
 
