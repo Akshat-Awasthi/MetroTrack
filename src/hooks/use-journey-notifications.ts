@@ -1,55 +1,70 @@
-
 "use client";
 
 import { useEffect, useRef } from 'react';
 import type { Station } from '@/types';
 
-async function showNotification(title: string, body: string) {
-  // Prefer showing via the ServiceWorkerRegistration (works even when
-  // navigator.serviceWorker.controller is not yet set). This is the most
-  // reliable way for PWAs on mobile to display notifications.
+async function showNotification(
+  title: string,
+  body: string,
+  options: {
+    image?: string;
+    data?: any;
+  } = {}
+) {
   if ('serviceWorker' in navigator) {
     try {
       const registration = await navigator.serviceWorker.getRegistration();
-      const options: any = {
+      const notificationOptions: any = {
         body,
         tag: 'journey-notification',
         renotify: true,
-        icon: '/icon-192x192.png',
+        icon: '/icon.png',
+        badge: '/icon.png',
+        vibrate: [200, 100, 200],
+        requireInteraction: false,
+        silent: false,
+        data: options.data || {},
+        actions: [
+          {
+            action: 'view',
+            title: '🚉 View Journey',
+            icon: '/view.svg'
+          },
+          {
+            action: 'close',
+            title: 'Dismiss',
+            icon: '/close.svg'
+          }
+        ],
+        image: options.image,
       };
 
       if (registration && typeof registration.showNotification === 'function') {
-        // Use the registration API which displays a notification from the
-        // service worker context (works in PWAs and when the page isn't
-        // controlled yet).
         await registration.showNotification(title, options as any);
         return;
       }
 
-      // If we couldn't get a registration, try sending a message to the
-      // active controller (older flow). Some environments may support this.
       if (navigator.serviceWorker.controller) {
         navigator.serviceWorker.controller.postMessage({
           type: 'show-notification',
-          payload: { title, body },
+          payload: { title, body, ...options },
         });
         return;
       }
     } catch (err) {
-      // continue to fallback to Notification API
       console.error('showNotification (service worker) failed:', err);
     }
   }
 
-  // Final fallback: direct Notification from the page. This requires
-  // permission and may be blocked on some mobile browsers in PWA mode,
-  // but it's better than nothing.
   try {
     new Notification(title, {
       body,
       tag: 'journey-notification',
       renotify: true,
-      icon: '/icon-192x192.png',
+      icon: '/icon.png',
+      badge: '/icon.png',
+      vibrate: [200, 100, 200],
+      data: options.data || {},
     } as any);
   } catch (err) {
     console.error('showNotification (Notification API) failed:', err);
@@ -63,10 +78,10 @@ export function useJourneyNotifications(
   const lastNotifiedStationId = useRef<string | null>(null);
 
   useEffect(() => {
-    if ('serviceWorker'in navigator) {
-        navigator.serviceWorker.register('/sw.js').catch(err => {
-            console.error('Service Worker registration failed:', err);
-        });
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(err => {
+        console.error('Service Worker registration failed:', err);
+      });
     }
   }, []);
 
@@ -78,10 +93,9 @@ export function useJourneyNotifications(
     if (Notification.permission !== 'granted') {
       return;
     }
-    
-    // Only notify if the station has changed
+
     if (currentStation.id === lastNotifiedStationId.current) {
-        return;
+      return;
     }
 
     lastNotifiedStationId.current = currentStation.id;
@@ -94,12 +108,25 @@ export function useJourneyNotifications(
     const previousStation = currentIndex > 0 ? route[currentIndex - 1] : null;
     const nextStation = currentIndex < route.length - 1 ? route[currentIndex + 1] : null;
 
-    let body = `Previous: ${previousStation ? previousStation.name : 'Start'}\n`;
-    body += `Next: ${nextStation ? nextStation.name : 'Destination'}`;
+    // Enhanced notification body with better formatting
+    const stationNumber = currentIndex + 1;
+    const totalStations = route.length;
+    
+    let body = `🚉 Station ${stationNumber} of ${totalStations}\n\n`;
+    body += `⬅️ Previous: ${previousStation ? previousStation.name : 'Start'}\n`;
+    body += `➡️ Next: ${nextStation ? nextStation.name : 'Final Destination'}`;
 
-    const title = `📍 Current Station: ${currentStation.name}`;
+    const title = `📍 Arrived: ${currentStation.name}`;
 
-    showNotification(title, body);
+    const progress = Math.round((stationNumber / totalStations) * 100);
 
+    showNotification(title, body, {
+      data: {
+        stationId: currentStation.id,
+        progress,
+        currentIndex,
+        totalStations,
+      }
+    });
   }, [route, currentStation]);
 }
