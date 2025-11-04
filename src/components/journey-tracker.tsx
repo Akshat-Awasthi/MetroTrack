@@ -8,12 +8,30 @@ import * as React from 'react';
 interface JourneyTrackerProps {
   route: Station[];
   currentLocation: { latitude: number; longitude: number } | null;
+  nearestStationOverride?: Station | null;
 }
 
-export function JourneyTracker({ route, currentLocation }: JourneyTrackerProps) {
-  const closestStationOnRoute = currentLocation ? findNearestStationOnRoute(currentLocation, route) : null;
-  const closestStationIndex = closestStationOnRoute 
-    ? route.findIndex(s => s.id === closestStationOnRoute.id) 
+export function JourneyTracker({ route, currentLocation, nearestStationOverride }: JourneyTrackerProps) {
+  // If we don't yet have a GPS fix, fall back to showing the start station
+  // as the current position so the user sees progress immediately.
+  const fallbackStation = route && route.length > 0 ? route[0] : null;
+
+  // Prefer a nearestStationOverride (provided by parent) when GPS is not available,
+  // otherwise use GPS coords to compute nearest station on the route. If neither is
+  // available, fall back to the route start.
+  const closestStationOnRoute = currentLocation
+    ? findNearestStationOnRoute(currentLocation, route)
+    : (nearestStationOverride ?? fallbackStation);
+
+  // Debug logging
+  React.useEffect(() => {
+    console.log('JourneyTracker - Current Location:', currentLocation);
+    console.log('JourneyTracker - Nearest Station Override:', nearestStationOverride);
+    console.log('JourneyTracker - Closest Station on Route:', closestStationOnRoute?.name);
+  }, [currentLocation, nearestStationOverride, closestStationOnRoute]);
+
+  const closestStationIndex = closestStationOnRoute
+    ? route.findIndex(s => s.id === closestStationOnRoute.id)
     : -1;
 
   const isFinished = closestStationIndex === route.length - 1;

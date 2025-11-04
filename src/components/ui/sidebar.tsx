@@ -652,8 +652,13 @@ const SidebarMenuSkeleton = React.forwardRef<
   }
 >(({ className, showIcon = false, ...props }, ref) => {
   // Random width between 50 to 90%.
-  const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
+  // Use a deterministic server-side initial value to avoid SSR/client
+  // hydration mismatches, then randomize on the client after mount.
+  const [width, setWidth] = React.useState<string>("70%")
+
+  React.useEffect(() => {
+    setWidth(`${Math.floor(Math.random() * 40) + 50}%`)
+    // empty deps — run once on client mount
   }, [])
 
   return (

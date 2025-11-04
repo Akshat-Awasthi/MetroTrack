@@ -1,4 +1,3 @@
-
 "use client";
 
 import * as React from "react";
@@ -44,7 +43,11 @@ const toMapCoords = (lat: number, lng: number) => {
 };
 
 export default function Home() {
-  const { position, error } = useGeolocation();
+  const { position, error } = useGeolocation({
+    enableHighAccuracy: true,
+    timeout: 5000,
+    maximumAge: 0
+  });
   const [closestStation, setClosestStation] = React.useState<Station | null>(null);
   
   // Journey state
@@ -66,6 +69,12 @@ export default function Home() {
   const stationEntries = React.useMemo(() => Object.values(stations), []);
   const sortedStations = React.useMemo(() => [...stationEntries].sort((a, b) => a.name.localeCompare(b.name)), [stationEntries]);
 
+  // When the user starts a journey but we don't yet have a live GPS fix, we
+  // can store a one-time nearest-station override so the tracker shows
+  // immediate progress. This is populated from the current `position` or
+  // by a one-shot `getCurrentPosition` call.
+  const [initialNearestStation, setInitialNearestStation] = React.useState<Station | null>(null);
+
   // Handle Notifications
   const closestStationOnRoute = position && journey ? findNearestStationOnRoute(position.coords, journey.route) : null;
   useJourneyNotifications(journey?.route || null, closestStationOnRoute);
@@ -73,7 +82,11 @@ export default function Home() {
 
   React.useEffect(() => {
     if (position) {
+      console.log('Home - GPS Position updated:', position.coords.latitude, position.coords.longitude);
+      console.log('Home - Total stations available:', Object.keys(stations).length);
+      console.log('Home - Sample station:', Object.values(stations)[0]);
       const nearestStation = findNearestStation(position.coords);
+      console.log('Home - Nearest station:', nearestStation?.name, nearestStation);
       setClosestStation(nearestStation);
       
       if (isWaitingForLocationToSetFrom && nearestStation) {
@@ -105,6 +118,23 @@ export default function Home() {
     if (fromStationId && toStationId) {
        const route = findJourneyRoute(fromStationId, toStationId);
        if(route && route.length > 0) {
+         // Compute an initial nearest station override to show progress
+         // immediately while the continuous watch position may still be
+         // acquiring. Prefer the live `position` if available.
+         if (position) {
+           const initial = findNearestStationOnRoute(position.coords, route);
+           setInitialNearestStation(initial);
+         } else if ('geolocation' in navigator) {
+           // One-shot attempt to get a quick fix; it's asynchronous and may
+           // prompt the user for permission. We'll set the override when it
+           // resolves — the tracker will update accordingly.
+           navigator.geolocation.getCurrentPosition((pos) => {
+             const initial = findNearestStationOnRoute(pos.coords, route);
+             setInitialNearestStation(initial);
+           }, () => {
+             // ignore failure — tracker will fall back to other heuristics
+           });
+         }
          if ('Notification' in window && Notification.permission !== 'denied') {
             await Notification.requestPermission();
          }
@@ -450,7 +480,26 @@ export default function Home() {
                  <ScrollArea className="flex-1 px-2">
                    <JourneyTracker 
                     route={journey.route}
-                    currentLocation={position ? position.coords : null}
+                   currentLocation={position ? position.coords : null}
+                   nearestStationOverride={(() => {
+                      // Only use override when we DON'T have an active GPS position
+                      if (position) return null;
+
+                      // Use the initial nearest station we computed when journey started
+                      if (initialNearestStation) {
+                        const isOnRoute = journey.route.some(s => s.id === initialNearestStation.id);
+                        if (isOnRoute) return initialNearestStation;
+                      }
+
+                      // Fall back to closestStation from last known position
+                      if (closestStation) {
+                        const isOnRoute = journey.route.some(s => s.id === closestStation.id);
+                        if (isOnRoute) return closestStation;
+                        return findNearestStationOnRoute({ latitude: closestStation.coordinates.lat, longitude: closestStation.coordinates.lng }, journey.route);
+                      }
+
+                      return null;
+                   })()}
                    />
                  </ScrollArea>
                 
@@ -467,8 +516,3 @@ export default function Home() {
     </main>
   );
 }
-
-    
-
-    
-

@@ -16,14 +16,38 @@ export function findNearestStation(
     return null;
   }
 
+  // Debug: surface station data and the incoming user coords to help diagnose
+  // cases where distance calculations return unexpected results.
+  try {
+    // eslint-disable-next-line no-console
+    console.log('utils.findNearestStation - total stations:', allStations.length);
+    // eslint-disable-next-line no-console
+    console.log('utils.findNearestStation - sample station:', allStations[0]);
+    // eslint-disable-next-line no-console
+    console.log('utils.findNearestStation - userCoords:', userCoords);
+  } catch (e) {
+    // ignore logging errors in environments that restrict console
+  }
+
+  // Coerce incoming coords to plain numbers to avoid issues when a
+  // GeolocationCoordinates-like object is passed in (browser objects can
+  // sometimes have getters or non-enumerable props).
+  const user = { latitude: Number(userCoords?.latitude), longitude: Number(userCoords?.longitude) };
+
   let closestStation: Station | null = null;
   let minDistance = Infinity;
 
   for (const station of allStations) {
-    const distance = getDistance(userCoords, {
+    const distance = getDistance(user, {
       latitude: station.coordinates.lat,
       longitude: station.coordinates.lng,
     });
+
+    // Debug a sample of computed distances to catch NaN or unexpected values
+    try {
+      // eslint-disable-next-line no-console
+      if (station === allStations[0]) console.log('utils.findNearestStation - sample distance to first station:', distance);
+    } catch (e) {}
 
     if (distance < minDistance) {
       minDistance = distance;
@@ -117,11 +141,34 @@ export function findNearestStationOnRoute(
     return null;
   }
 
+  try {
+    // eslint-disable-next-line no-console
+    console.log('utils.findNearestStationOnRoute - route length:', route.length);
+    // eslint-disable-next-line no-console
+    console.log('utils.findNearestStationOnRoute - userCoords:', userCoords);
+  } catch (e) {
+    // ignore
+  }
+
+  // Coerce incoming coords to plain numbers similar to findNearestStation
+  const user = { latitude: Number(userCoords?.latitude), longitude: Number(userCoords?.longitude) };
+
+  // Also log a sample distance to the first station on the route to detect NaN issues
+  try {
+    if (route.length > 0) {
+      const sampleDist = getDistance(user, { latitude: route[0].coordinates.lat, longitude: route[0].coordinates.lng });
+      // eslint-disable-next-line no-console
+      console.log('utils.findNearestStationOnRoute - sample distance to first route station:', sampleDist);
+    }
+  } catch (e) {
+    // ignore
+  }
+
   let closestStation: Station | null = null;
   let minDistance = Infinity;
 
   for (const station of route) {
-    const distance = getDistance(userCoords, {
+    const distance = getDistance(user, {
       latitude: station.coordinates.lat,
       longitude: station.coordinates.lng,
     });
