@@ -22,7 +22,7 @@ async function showNotification(title: string, body: string) {
         // Use the registration API which displays a notification from the
         // service worker context (works in PWAs and when the page isn't
         // controlled yet).
-        registration.showNotification(title, options as any);
+        await registration.showNotification(title, options as any);
         return;
       }
 
