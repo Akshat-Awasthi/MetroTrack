@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Compass, LoaderCircle, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair, MoveRight, MoveLeft } from "lucide-react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { /*usePathname, useRouter, useSearchParams*/ } from "next/navigation";
 
 import { useGeolocation } from "@/hooks/use-geolocation";
 import { metroLines, stations } from "@/lib/delhi-metro-data";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
 import BottomMenu from "@/components/bottom-menu";
+import UrlSearchSync from "@/components/url-search-sync";
 import { AmenityFinder } from "@/components/amenity-finder";
 import { JourneyTracker } from "@/components/journey-tracker";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -66,12 +67,7 @@ export default function Home() {
   const [translate, setTranslate] = React.useState({ x: -200, y: -100 });
   const [isDragging, setIsDragging] = React.useState(false);
   const [startDrag, setStartDrag] = React.useState({ x: 0, y: 0 });
-  // URL / routing
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const transformSyncTimerRef = React.useRef<number | null>(null);
-  const [urlInitialized, setUrlInitialized] = React.useState(false);
+  // URL / routing handled in a Suspense-wrapped child component
   // (Bottom menu behavior moved to a dedicated BottomMenu component)
 
   const { toast } = useToast();
@@ -105,113 +101,7 @@ export default function Home() {
     }
   }, [position, isWaitingForLocationToSetFrom]);
 
-  // Initialize state from URL search params when they change (or on first load)
-  React.useEffect(() => {
-    if (!searchParams) return;
-    const from = searchParams.get("from");
-    const to = searchParams.get("to");
-    const journeyParam = searchParams.get("journey");
-    const scaleParam = searchParams.get("scale");
-    const txParam = searchParams.get("tx");
-    const tyParam = searchParams.get("ty");
-
-    if (from && from !== fromStationId) setFromStationId(from);
-    if (to && to !== toStationId) setToStationId(to);
-
-    // Restore map transform if present
-    if (scaleParam) {
-      const parsed = parseFloat(scaleParam);
-      if (!Number.isNaN(parsed)) setScale(parsed);
-    }
-    if (txParam && tyParam) {
-      const x = parseFloat(txParam);
-      const y = parseFloat(tyParam);
-      if (!Number.isNaN(x) && !Number.isNaN(y)) setTranslate({ x, y });
-    }
-
-    // If journey param is present and we have from+to, start journey state
-    if (journeyParam === "1" && from && to && !journey) {
-      const route = findJourneyRoute(from, to);
-      if (route) {
-        setJourney({ from: stations[from], to: stations[to], route });
-      }
-    }
-
-    // If journey param is absent, ensure we don't stay in journey
-    if (journeyParam !== "1" && journey) {
-      setJourney(null);
-    }
-    // Mark that we've initialized from URL so the sync effect doesn't stomp incoming params
-    setUrlInitialized(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
-
-  // Reflect changes in important state back to the URL. We avoid noisy updates by
-  // throttling map transform updates and only pushing when values differ.
-  React.useEffect(() => {
-  if (!router || !pathname) return;
-  // Don't sync back to the URL until we've initialized state from any incoming params
-  if (!urlInitialized) return;
-    const currentFrom = searchParams?.get("from");
-    const currentTo = searchParams?.get("to");
-    const currentJourney = searchParams?.get("journey");
-    const currentScale = searchParams?.get("scale");
-    const currentTx = searchParams?.get("tx");
-    const currentTy = searchParams?.get("ty");
-
-    const needsImmediateReplace = (
-      (fromStationId || "") !== (currentFrom || "") ||
-      (toStationId || "") !== (currentTo || "") ||
-      ((journey ? "1" : "") !== (currentJourney || ""))
-    );
-
-    // Build base params (from/to/journey)
-    const baseParams = new URLSearchParams();
-    if (fromStationId) baseParams.set("from", fromStationId);
-    if (toStationId) baseParams.set("to", toStationId);
-    if (journey) baseParams.set("journey", "1");
-
-    // If base params differ from URL, replace immediately (this handles selections/start/end)
-    if (needsImmediateReplace) {
-      // Keep current transform params from URL (so we don't drop them unintentionally)
-      if (currentScale) baseParams.set("scale", currentScale);
-      if (currentTx) baseParams.set("tx", currentTx);
-      if (currentTy) baseParams.set("ty", currentTy);
-      const newUrl = pathname + (baseParams.toString() ? `?${baseParams.toString()}` : "");
-      router.replace(newUrl);
-    }
-
-    // Throttle transform updates so panning/zooming doesn't flood history/navigation
-    if (transformSyncTimerRef.current) {
-      window.clearTimeout(transformSyncTimerRef.current);
-    }
-    transformSyncTimerRef.current = window.setTimeout(() => {
-      const transformParams = new URLSearchParams(baseParams.toString());
-      transformParams.set("scale", String(scale));
-      transformParams.set("tx", String(translate.x));
-      transformParams.set("ty", String(translate.y));
-
-      // Only replace if something is different
-      const changed = (
-        transformParams.get("scale") !== currentScale ||
-        transformParams.get("tx") !== currentTx ||
-        transformParams.get("ty") !== currentTy ||
-        needsImmediateReplace
-      );
-      if (changed) {
-        const newUrl = pathname + (transformParams.toString() ? `?${transformParams.toString()}` : "");
-        router.replace(newUrl);
-      }
-    }, 250) as unknown as number;
-
-    return () => {
-      if (transformSyncTimerRef.current) {
-        window.clearTimeout(transformSyncTimerRef.current);
-        transformSyncTimerRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fromStationId, toStationId, journey, scale, translate]);
+  // URL sync logic moved to `UrlSearchSync` which is rendered inside a Suspense boundary.
   
   const handleSetNearestStationAsFrom = () => {
     if (position && closestStation) {
@@ -431,6 +321,22 @@ export default function Home() {
           </Sheet>
         </div>
       </header>
+
+      {/* URL sync/read performed in a Suspense boundary so useSearchParams() is contained */}
+      <React.Suspense fallback={null}>
+        <UrlSearchSync
+          fromStationId={fromStationId}
+          setFromStationId={setFromStationId}
+          toStationId={toStationId}
+          setToStationId={setToStationId}
+          journey={journey}
+          setJourney={setJourney}
+          scale={scale}
+          setScale={setScale}
+          translate={translate}
+          setTranslate={setTranslate}
+        />
+      </React.Suspense>
 
       <div 
         ref={mapRef}
