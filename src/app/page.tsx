@@ -260,6 +260,16 @@ export default function Home() {
   
   const userMapPos = position ? toMapCoords(position.coords.latitude, position.coords.longitude) : null;
 
+  // Auto-center on first successful GPS fix (do not repeat on subsequent updates)
+  const didAutoCenterRef = React.useRef(false);
+  React.useEffect(() => {
+    if (position && !didAutoCenterRef.current) {
+      // centerOnUser guards for userMapPos internally
+      centerOnUser();
+      didAutoCenterRef.current = true;
+    }
+  }, [position]);
+
   const estimatedJourney = React.useMemo(() => {
     if (!journey) return null;
     return estimateJourneyDuration(journey.route);
@@ -340,7 +350,7 @@ export default function Home() {
 
       <div 
         ref={mapRef}
-        className="flex-1 relative overflow-hidden cursor-grab"
+        className={cn("flex-1 relative overflow-hidden cursor-grab", journey ? "pointer-events-none" : "pointer-events-auto")}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
@@ -505,8 +515,9 @@ export default function Home() {
           </div>
         </div>
       ) : (
-        // Journey full-screen details with a bottom draggable menu for ETA + end journey
-        <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm overflow-auto">
+  // Journey full-screen details with a bottom draggable menu for ETA + end journey
+  // Make overlay opaque (no backdrop blur) so the map is not visible/blurred behind it.
+  <div className="fixed inset-0 z-50 bg-background overflow-auto">
           <div className="p-4 pt-6 text-center relative">
             <div className="absolute left-4 top-4">
               <Button variant="ghost" size="icon" className="border" onClick={handleBackToPlan}>
