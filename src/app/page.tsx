@@ -1,14 +1,17 @@
 "use client";
 
 import * as React from "react";
-import { ArrowLeft, Compass, LoaderCircle, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair, MoveRight } from "lucide-react";
+import { Compass, LoaderCircle, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair, MoveRight, MoveLeft } from "lucide-react";
+import { /*usePathname, useRouter, useSearchParams*/ } from "next/navigation";
 
 import { useGeolocation } from "@/hooks/use-geolocation";
 import { metroLines, stations } from "@/lib/delhi-metro-data";
-import { findNearestStation, findJourneyRoute, cn, findNearestStationOnRoute } from "@/lib/utils";
+import { findNearestStation, findJourneyRoute, cn, findNearestStationOnRoute, estimateJourneyDuration } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
+import BottomMenu from "@/components/bottom-menu";
+import UrlSearchSync from "@/components/url-search-sync";
 import { AmenityFinder } from "@/components/amenity-finder";
 import { JourneyTracker } from "@/components/journey-tracker";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -64,6 +67,8 @@ export default function Home() {
   const [translate, setTranslate] = React.useState({ x: -200, y: -100 });
   const [isDragging, setIsDragging] = React.useState(false);
   const [startDrag, setStartDrag] = React.useState({ x: 0, y: 0 });
+  // URL / routing handled in a Suspense-wrapped child component
+  // (Bottom menu behavior moved to a dedicated BottomMenu component)
 
   const { toast } = useToast();
   const stationEntries = React.useMemo(() => Object.values(stations), []);
@@ -95,6 +100,8 @@ export default function Home() {
       }
     }
   }, [position, isWaitingForLocationToSetFrom]);
+
+  // URL sync logic moved to `UrlSearchSync` which is rendered inside a Suspense boundary.
   
   const handleSetNearestStationAsFrom = () => {
     if (position && closestStation) {
@@ -252,6 +259,31 @@ export default function Home() {
   };
   
   const userMapPos = position ? toMapCoords(position.coords.latitude, position.coords.longitude) : null;
+
+  const estimatedJourney = React.useMemo(() => {
+    if (!journey) return null;
+    return estimateJourneyDuration(journey.route);
+  }, [journey]);
+
+  const formatMinutesSeconds = (seconds?: number | null) => {
+    if (seconds === null || seconds === undefined) return "—";
+    const s = Math.round(seconds);
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const rem = s % 60;
+    return rem === 0 ? `${m} min` : `${m}m ${rem}s`;
+  };
+
+  // BottomMenu handles drag/resize and breakdown formatting
+
+  const formatDuration = (seconds: number | null) => {
+    if (!seconds && seconds !== 0) return "—";
+    const s = Math.round(seconds as number);
+    // Round to nearest minute for display. Show '<1 min' for very short journeys.
+    const mins = Math.round(s / 60);
+    if (mins <= 0) return "<1 min";
+    return `${mins} min`;
+  };
   
   return (
     <main className="h-[100dvh] w-screen flex flex-col bg-gray-50 dark:bg-gray-950">
@@ -289,6 +321,22 @@ export default function Home() {
           </Sheet>
         </div>
       </header>
+
+      {/* URL sync/read performed in a Suspense boundary so useSearchParams() is contained */}
+      <React.Suspense fallback={null}>
+        <UrlSearchSync
+          fromStationId={fromStationId}
+          setFromStationId={setFromStationId}
+          toStationId={toStationId}
+          setToStationId={setToStationId}
+          journey={journey}
+          setJourney={setJourney}
+          scale={scale}
+          setScale={setScale}
+          translate={translate}
+          setTranslate={setTranslate}
+        />
+      </React.Suspense>
 
       <div 
         ref={mapRef}
@@ -405,131 +453,142 @@ export default function Home() {
         </div>
       </div>
 
-      <Sheet modal={false} open={true}>
-        <SheetContent 
-          side="bottom" 
-          hideCloseButton 
-          className={cn("rounded-t-lg transition-all duration-300 p-0",
-            journey ? "h-[85dvh]" : "h-auto max-h-[60dvh]"
-          )}
-        >
-       <SheetHeader className="p-4 pt-2 text-center relative">
-         <div className="mx-auto h-1.5 w-12 rounded-full bg-muted-foreground/20 mb-2 cursor-grab active:cursor-grabbing"></div>
-         {journey && (
-          <div className="absolute left-4 top-4">
-            <Button variant="ghost" size="icon" onClick={handleBackToPlan}>
-             <ArrowLeft className="h-5 w-5" />
-            </Button>
-          </div>
-         )}
-         <SheetTitle className="font-headline text-lg sm:text-xl text-center">
-           {journey ? "Journey Details" : "Plan Your Journey"}
-         </SheetTitle>
-       </SheetHeader>
-          <div className="overflow-y-auto h-full pb-4">
-            {!journey ? (
-              // Journey Selection UI
-              <div className="px-4 space-y-4">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="flex-1 flex gap-2 items-center pt-1">
-                    <StationCombobox
-                      stations={sortedStations}
-                      value={fromStationId}
-                      onSelect={setFromStationId}
-                      placeholder="From Station"
-                    />
-                     <Button variant="outline" size="icon" className="shrink-0" onClick={handleSetNearestStationAsFrom} disabled={isWaitingForLocationToSetFrom}>
-                      {isWaitingForLocationToSetFrom ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Crosshair className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                  <div className="sm:self-center">
-                    <Button variant="ghost" size="icon" className="hidden sm:flex" onClick={handleSwapStations} disabled={!fromStationId && !toStationId}>
-                        <ArrowLeftRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="flex-1">
-                    <StationCombobox
-                      stations={sortedStations.filter(s => s.id !== fromStationId)}
-                      value={toStationId}
-                      onSelect={setToStationId}
-                      placeholder="To Station"
-                      disabled={!fromStationId}
-                    />
-                  </div>
-                </div>
-                <Button className="w-full" onClick={handleStartJourney} disabled={!fromStationId || !toStationId}>
-                    <Train className="mr-2 h-4 w-4" />
-                    Start Journey
+      {/* When not on a journey show the planning panel (non-draggable) */}
+      {!journey ? (
+        <div className="rounded-t-lg bg-background/90 backdrop-blur-sm p-4 border-t">
+          <div className="px-0 space-y-4">
+            <div className="flex flex-col sm:flex-row gap-2">
+              <div className="flex-1 flex gap-2 items-center pt-1">
+                <StationCombobox
+                  stations={sortedStations}
+                  value={fromStationId}
+                  onSelect={setFromStationId}
+                  placeholder="From Station"
+                />
+                 <Button variant="outline" size="icon" className="shrink-0" onClick={handleSetNearestStationAsFrom} disabled={isWaitingForLocationToSetFrom}>
+                  {isWaitingForLocationToSetFrom ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Crosshair className="h-4 w-4" />}
                 </Button>
-                 {!position && !error && !isWaitingForLocationToSetFrom && (
-                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-4">
-                      <LoaderCircle className="animate-spin h-8 w-8 mb-4" />
-                      <p>Acquiring GPS signal...</p>
-                      <p className="text-xs mt-1">Enable location services for live tracking.</p>
-                    </div>
-                  )}
-
-                  {error && (
-                     <div className="flex flex-col items-center justify-center h-full text-destructive py-4">
-                       <Compass className="h-8 w-8 mb-4" />
-                       <p className="font-semibold">{error}</p>
-                       <p className="text-xs mt-1 text-center">Please grant location permissions and ensure your GPS is enabled.</p>
-                    </div>
-                  )}
               </div>
-            ) : (
-               // Journey Tracking UI
-               <div className="space-y-4 flex flex-col h-full">
-                 <Card className="mx-4">
-                    <CardContent className="p-3 sm:p-4 flex items-center justify-between text-center">
-                        <div className="flex-1">
-                            <p className="text-xs text-muted-foreground">From</p>
-                            <p className="font-bold text-sm sm:text-base truncate">{journey.from.name}</p>
-                        </div>
-                        <MoveRight className="h-5 w-5 text-primary mx-2 shrink-0" />
-                        <div className="flex-1">
-                            <p className="text-xs text-muted-foreground">To</p>
-                            <p className="font-bold text-sm sm:text-base truncate">{journey.to.name}</p>
-                        </div>
-                    </CardContent>
-                 </Card>
-
-                 <ScrollArea className="flex-1 px-2">
-                   <JourneyTracker 
-                    route={journey.route}
-                   currentLocation={position ? position.coords : null}
-                   nearestStationOverride={(() => {
-                      // Only use override when we DON'T have an active GPS position
-                      if (position) return null;
-
-                      // Use the initial nearest station we computed when journey started
-                      if (initialNearestStation) {
-                        const isOnRoute = journey.route.some(s => s.id === initialNearestStation.id);
-                        if (isOnRoute) return initialNearestStation;
-                      }
-
-                      // Fall back to closestStation from last known position
-                      if (closestStation) {
-                        const isOnRoute = journey.route.some(s => s.id === closestStation.id);
-                        if (isOnRoute) return closestStation;
-                        return findNearestStationOnRoute({ latitude: closestStation.coordinates.lat, longitude: closestStation.coordinates.lng }, journey.route);
-                      }
-
-                      return null;
-                   })()}
-                   />
-                 </ScrollArea>
-                
-                 <div className="px-4 pt-2 border-t">
-                    <Button variant="destructive" className="w-full" onClick={handleEndJourney}>
-                        End Journey
-                    </Button>
-                 </div>
-               </div>
+              <div className="sm:self-center">
+                <Button variant="ghost" size="icon" className="hidden sm:flex" onClick={handleSwapStations} disabled={!fromStationId && !toStationId}>
+                    <ArrowLeftRight className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="flex-1">
+                <StationCombobox
+                  stations={sortedStations.filter(s => s.id !== fromStationId)}
+                  value={toStationId}
+                  onSelect={setToStationId}
+                  placeholder="To Station"
+                  disabled={!fromStationId}
+                />
+              </div>
+            </div>
+            <Button className="w-full" onClick={handleStartJourney} disabled={!fromStationId || !toStationId}>
+                <Train className="mr-2 h-4 w-4" />
+                Start Journey
+            </Button>
+            {!position && !error && !isWaitingForLocationToSetFrom && (
+              <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-4">
+                <LoaderCircle className="animate-spin h-8 w-8 mb-4" />
+                <p>Acquiring GPS signal...</p>
+                <p className="text-xs mt-1">Enable location services for live tracking.</p>
+              </div>
+            )}
+            {error && (
+              <div className="flex flex-col items-center justify-center h-full text-destructive py-4">
+                <Compass className="h-8 w-8 mb-4" />
+                <p className="font-semibold">{error}</p>
+                <p className="text-xs mt-1 text-center">Please grant location permissions and ensure your GPS is enabled.</p>
+              </div>
             )}
           </div>
-        </SheetContent>
-      </Sheet>
+        </div>
+      ) : (
+        // Journey full-screen details with a bottom draggable menu for ETA + end journey
+        <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm overflow-auto">
+          <div className="p-4 pt-6 text-center relative">
+            <div className="absolute left-4 top-4">
+              <Button variant="ghost" size="icon" className="border" onClick={handleBackToPlan}>
+               <MoveLeft className="h-5 w-5" />
+              </Button>
+            </div>
+            <h2 className="text-lg font-headline">Journey Details</h2>
+          </div>
+
+          <div className="px-4">
+            <Card className="mx-0">
+              <CardContent className="p-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between text-center">
+                <div className="flex items-center justify-between w-full">
+                  <div className="flex-1 w-full sm:w-auto">
+                    <p className="text-xs text-muted-foreground">From</p>
+                    <p className="font-bold text-sm sm:text-base truncate">{journey.from.name}</p>
+                  </div>
+                  <MoveRight className="h-5 w-5 text-primary mx-2 my-2 shrink-0" />
+                  <div className="flex-1 w-full sm:w-auto">
+                    <p className="text-xs text-muted-foreground">To</p>
+                    <p className="font-bold text-sm sm:text-base truncate">{journey.to.name}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="mt-4">
+              <ScrollArea className="h-[60vh] px-0">
+                <JourneyTracker 
+                  route={journey.route}
+                  currentLocation={position ? position.coords : null}
+                  nearestStationOverride={(() => {
+                    if (position) return null;
+                    if (initialNearestStation) {
+                      const isOnRoute = journey.route.some(s => s.id === initialNearestStation.id);
+                      if (isOnRoute) return initialNearestStation;
+                    }
+                    if (closestStation) {
+                      const isOnRoute = journey.route.some(s => s.id === closestStation.id);
+                      if (isOnRoute) return closestStation;
+                      return findNearestStationOnRoute({ latitude: closestStation.coordinates.lat, longitude: closestStation.coordinates.lng }, journey.route);
+                    }
+                    return null;
+                  })()}
+                />
+              </ScrollArea>
+            </div>
+
+            {/* Bottom menu: ETA breakdown + End Journey button */}
+            <BottomMenu title={undefined} initialHeightVh={30}>
+              <div className="p-3">
+                {estimatedJourney && (
+                  <Card className="mb-3">
+                    <CardContent className="p-3 text-sm">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="text-muted-foreground">Distance</div>
+                        <div className="font-medium">{estimatedJourney.breakdown.distanceMeters} m</div>
+
+                        <div className="text-muted-foreground">Running</div>
+                        <div className="font-medium">{formatMinutesSeconds(estimatedJourney.breakdown.runningSeconds)}</div>
+
+                        <div className="text-muted-foreground">Dwell</div>
+                        <div className="font-medium">{formatMinutesSeconds(estimatedJourney.breakdown.dwellSeconds)}</div>
+
+                        <div className="text-muted-foreground">Transfers</div>
+                        <div className="font-medium">{formatMinutesSeconds(estimatedJourney.breakdown.transferSeconds)}</div>
+
+                        <div className="text-muted-foreground">Line changes</div>
+                        <div className="font-medium">{estimatedJourney.breakdown.lineChangeCount} ({formatMinutesSeconds(estimatedJourney.breakdown.lineChangePenaltySeconds)})</div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                <Button variant="destructive" className="w-full" onClick={handleEndJourney}>
+                  End Journey
+                </Button>
+              </div>
+            </BottomMenu>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

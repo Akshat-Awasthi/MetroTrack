@@ -180,3 +180,95 @@ export function findNearestStationOnRoute(
   }
   return closestStation;
 }
+
+/**
+ * Estimate journey duration for a route in seconds.
+ *
+ * Heuristics used (sourced from DMRC / public information):
+ * - Average running speed: 45 km/h (typical average including acceleration/braking)
+ * - Dwell time per intermediate stop: 20 seconds
+ * - Transfer (interchange) penalty when route contains consecutive stations with the same name but different ids: 120 seconds
+ */
+export function estimateJourneyDuration(route: Station[] | null): { seconds: number; breakdown: { distanceMeters: number; runningSeconds: number; dwellSeconds: number; transferSeconds: number; lineChangeCount: number; lineChangePenaltySeconds: number } } | null {
+  if (!route || route.length < 2) return null;
+
+  const AVG_SPEED_KMPH = 45; // km/h
+  const DWELL_SECONDS_PER_STOP = 20; // seconds
+  const TRANSFER_PENALTY_SECONDS = 120; // seconds for interchange
+  const LINE_CHANGE_PENALTY_SECONDS = 10 * 60; // minimum 10 minutes per line change
+
+  let distanceMeters = 0;
+  let transferCount = 0;
+  let lineChangeCount = 0;
+
+  // Helper to pick a line used between two stations. We pick a line present on both stations
+  // if possible. If multiple, prefer the currentLine when provided.
+  const commonLineBetween = (a: Station, b: Station, prefer?: string | null): string | null => {
+    const setA = new Set(a.lines || []);
+    const setB = new Set(b.lines || []);
+    // if prefer is available and both stations have it, pick it
+    if (prefer && setA.has(prefer) && setB.has(prefer)) return prefer;
+    for (const l of a.lines || []) {
+      if (setB.has(l)) return l;
+    }
+    // no common line found
+    return null;
+  };
+
+  let currentLine: string | null = null;
+
+  for (let i = 0; i < route.length - 1; i++) {
+    const a = route[i];
+    const b = route[i + 1];
+    try {
+      distanceMeters += getDistance(
+        { latitude: a.coordinates.lat, longitude: a.coordinates.lng },
+        { latitude: b.coordinates.lat, longitude: b.coordinates.lng }
+      );
+    } catch (e) {
+      // ignore distance errors for malformed coords
+    }
+
+    // If two adjacent stations share the same name but are different ids, treat as an interchange
+    if (a.name === b.name && a.id !== b.id) transferCount++;
+
+    // Detect line used for this segment and whether it represents a line change
+    const segmentLine = commonLineBetween(a, b, currentLine);
+    if (i === 0) {
+      currentLine = segmentLine;
+    } else {
+      // If we found a segment line and it's different from currentLine, count a line change
+      if (segmentLine && currentLine && segmentLine !== currentLine) {
+        lineChangeCount++;
+        currentLine = segmentLine;
+      }
+      // If no common line found between stations, but names differ (non-interchange), we still
+      // consider this a line change as trains would require transfer-like behaviour.
+      if (!segmentLine && currentLine) {
+        lineChangeCount++;
+        currentLine = null;
+      }
+      // If currentLine is null and segmentLine exists, adopt it without counting a change
+      if (!currentLine && segmentLine) currentLine = segmentLine;
+    }
+  }
+
+  const runningSeconds = (distanceMeters / 1000) / AVG_SPEED_KMPH * 3600;
+  const stops = route.length - 1; // number of station stops between origin and destination
+  const dwellSeconds = stops * DWELL_SECONDS_PER_STOP;
+  const transferSeconds = transferCount * TRANSFER_PENALTY_SECONDS;
+  const lineChangePenaltySeconds = lineChangeCount * LINE_CHANGE_PENALTY_SECONDS;
+
+  const seconds = Math.round(runningSeconds + dwellSeconds + transferSeconds + lineChangePenaltySeconds);
+  return {
+    seconds,
+    breakdown: {
+      distanceMeters: Math.round(distanceMeters),
+      runningSeconds: Math.round(runningSeconds),
+      dwellSeconds,
+      transferSeconds,
+      lineChangeCount,
+      lineChangePenaltySeconds,
+    },
+  };
+}
