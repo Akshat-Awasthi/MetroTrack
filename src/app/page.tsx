@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowLeft, ArrowRight, Compass, LoaderCircle, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair } from "lucide-react";
+import { ArrowLeft, Compass, LoaderCircle, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair, MoveRight } from "lucide-react";
 
 import { useGeolocation } from "@/hooks/use-geolocation";
 import { metroLines, stations } from "@/lib/delhi-metro-data";
@@ -9,7 +9,6 @@ import { findNearestStation, findJourneyRoute, cn, findNearestStationOnRoute } f
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetTrigger } from "@/components/ui/sheet";
-import { MetroTrackLogo } from "@/components/icons";
 import { AmenityFinder } from "@/components/amenity-finder";
 import { JourneyTracker } from "@/components/journey-tracker";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -17,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { StationCombobox } from "@/components/station-combobox";
 import { Station } from "@/types";
 import { useJourneyNotifications } from "@/hooks/use-journey-notifications";
+import Image from "next/image";
 
 
 const MAP_BOUNDS = {
@@ -257,7 +257,12 @@ export default function Home() {
     <main className="h-[100dvh] w-screen flex flex-col bg-gray-50 dark:bg-gray-950">
       <header className="flex items-center justify-between p-3 bg-background/80 backdrop-blur-sm border-b shadow-sm z-10">
         <div className="flex items-center gap-2">
-          <MetroTrackLogo className="h-8 w-8 text-primary" />
+          <Image
+            src="/icon.svg"
+            alt="MetroTrack Logo"
+            width={32}
+            height={32}
+          />
           <h1 className="text-xl font-bold tracking-tight text-primary">MetroTrack</h1>
         </div>
         <div className="flex items-center gap-2">
@@ -481,7 +486,7 @@ export default function Home() {
                             <p className="text-xs text-muted-foreground">From</p>
                             <p className="font-bold text-sm sm:text-base truncate">{journey.from.name}</p>
                         </div>
-                        <ArrowRight className="h-5 w-5 text-primary mx-2 shrink-0" />
+                        <MoveRight className="h-5 w-5 text-primary mx-2 shrink-0" />
                         <div className="flex-1">
                             <p className="text-xs text-muted-foreground">To</p>
                             <p className="font-bold text-sm sm:text-base truncate">{journey.to.name}</p>
