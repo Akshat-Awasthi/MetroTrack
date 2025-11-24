@@ -2,7 +2,7 @@
 
 import { Train, MapPin } from 'lucide-react';
 import type { Station } from '@/types';
-import { cn, findNearestStationOnRoute } from '@/lib/utils';
+import { cn, findNearestStationOnRoute, getRouteProgress } from '@/lib/utils';
 import * as React from 'react';
 import { metroLines } from '@/lib/delhi-metro-data';
 
@@ -116,7 +116,7 @@ export function JourneyTracker({ route, currentLocation, nearestStationOverride 
       ro.disconnect();
     };
   }, [route]);
-  
+
   return (
     <div ref={containerRef} className="relative pl-8 pr-4 py-4">
       {/* segmented colored track (left) */}
@@ -168,25 +168,49 @@ export function JourneyTracker({ route, currentLocation, nearestStationOverride 
       {/* transfer badges are rendered inline next to station names so they
           appear at the exact same vertical position as the station and do
           not overlap the broken track. */}
-      
+
       {closestStationIndex !== -1 && !isFinished && (
-         <div 
-           className="absolute -translate-y-1/2 mt-1 z-10 transition-all duration-1000 ease-in-out"
-           style={{
-             left: '1rem',
-             top: stationTops.length === route.length && stationTops[closestStationIndex] !== undefined
-               ? `${(stationTops[closestStationIndex] / (containerRef.current?.getBoundingClientRect().height || 1)) * 100}%`
-               : `${((closestStationIndex) / Math.max(1, route.length - 1)) * 100}%`,
-             transform: 'translateX(-50%) translateY(-50%)'
-           }}
+        <div
+          className="absolute -translate-y-1/2 mt-1 z-10 transition-all duration-300 ease-linear"
+          style={{
+            left: '1rem',
+            top: stationTops.length === route.length
+              ? (() => {
+                const progress = currentLocation ? getRouteProgress(currentLocation, route) : (
+                  nearestStationOverride ? route.findIndex(s => s.id === nearestStationOverride.id) : (
+                    closestStationIndex !== -1 ? closestStationIndex : 0
+                  )
+                );
+
+                // Interpolate position
+                const idx = Math.floor(progress);
+                const t = progress - idx;
+                // If we are at the very end, clamp
+                if (idx >= stationTops.length - 1) {
+                  const lastTop = stationTops[stationTops.length - 1];
+                  return `${(lastTop / (containerRef.current?.getBoundingClientRect().height || 1)) * 100}%`;
+                }
+
+                const topA = stationTops[idx];
+                const topB = stationTops[idx + 1];
+
+                // Safety check if measuring isn't done or arrays mismatch
+                if (topA === undefined || topB === undefined) return '0%';
+
+                const topPx = topA + (topB - topA) * t;
+                return `${(topPx / (containerRef.current?.getBoundingClientRect().height || 1)) * 100}%`;
+              })()
+              : `${((closestStationIndex) / Math.max(1, route.length - 1)) * 100}%`,
+            transform: 'translateX(-50%) translateY(-50%)'
+          }}
+        >
+          <div
+            className="rounded-full p-1.5 ml-1 shadow-lg border-2 border-background"
+            style={{ backgroundColor: lineColorMap[route[closestStationIndex]?.lines?.[0] ?? ''] || undefined }}
           >
-            <div
-              className="rounded-full p-1.5 ml-1 shadow-lg border-2 border-background"
-              style={{ backgroundColor: lineColorMap[route[closestStationIndex]?.lines?.[0] ?? ''] || undefined }}
-            >
-                <Train className="h-5 w-5 text-white" />
-            </div>
-         </div>
+            <Train className="h-5 w-5 text-white" />
+          </div>
+        </div>
       )}
 
       <ul className="space-y-6">
@@ -200,19 +224,19 @@ export function JourneyTracker({ route, currentLocation, nearestStationOverride 
           return (
             <li
               ref={el => { stationRefs.current[index] = el; }}
-                key={station.id}
-                className="relative flex items-center min-h-[40px]"
-              >
-              <div 
+              key={station.id}
+              className="relative flex items-center min-h-[40px]"
+            >
+              <div
                 className={cn(
                   "absolute left-0 -translate-x-1/2 w-4 h-4 rounded-full border-2 flex items-center justify-center z-10",
                   hasBeenVisited ? "bg-primary border-background" : "bg-background border-primary/20"
-                )} 
+                )}
                 style={{ left: '1rem' }}
               >
                 {(isStart || (isEnd && hasBeenVisited)) && <MapPin className="h-2 w-2 text-primary-foreground" />}
               </div>
-              
+
               <div className={cn(
                 "ml-8 text-sm transition-colors",
                 hasBeenVisited ? "font-semibold text-foreground" : "text-muted-foreground"
@@ -230,9 +254,9 @@ export function JourneyTracker({ route, currentLocation, nearestStationOverride 
               </div>
 
               {isCurrent && (
-                  <div className="ml-auto text-xs font-bold text-primary animate-pulse text-right">
-                      {isFinished ? 'ARRIVED' : 'CURRENT'}
-                  </div>
+                <div className="ml-auto text-xs font-bold text-primary animate-pulse text-right">
+                  {isFinished ? 'ARRIVED' : 'CURRENT'}
+                </div>
               )}
             </li>
           );

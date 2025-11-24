@@ -47,7 +47,7 @@ export function findNearestStation(
     try {
       // eslint-disable-next-line no-console
       if (station === allStations[0]) console.log('utils.findNearestStation - sample distance to first station:', distance);
-    } catch (e) {}
+    } catch (e) { }
 
     if (distance < minDistance) {
       minDistance = distance;
@@ -179,6 +179,56 @@ export function findNearestStationOnRoute(
     }
   }
   return closestStation;
+}
+
+export function getRouteProgress(
+  userCoords: { latitude: number; longitude: number },
+  route: Station[]
+): number {
+  if (!route || route.length < 2) return 0;
+
+  let minDistance = Infinity;
+  let bestProgress = 0;
+
+  const user = { x: Number(userCoords.longitude), y: Number(userCoords.latitude) };
+
+  // 1. Check if we are close enough to any station to snap exactly to it.
+  // This handles GPS jitter when at a station.
+  const SNAP_RADIUS_METERS = 200;
+  for (let i = 0; i < route.length; i++) {
+    const dist = getDistance(userCoords, { latitude: route[i].coordinates.lat, longitude: route[i].coordinates.lng });
+    if (dist <= SNAP_RADIUS_METERS) {
+      return i;
+    }
+  }
+
+  // 2. If not snapped, project onto the route segments.
+  for (let i = 0; i < route.length - 1; i++) {
+    const a = { x: route[i].coordinates.lng, y: route[i].coordinates.lat };
+    const b = { x: route[i + 1].coordinates.lng, y: route[i + 1].coordinates.lat };
+
+    // Project user onto segment ab
+    const ab = { x: b.x - a.x, y: b.y - a.y };
+    const ap = { x: user.x - a.x, y: user.y - a.y };
+
+    const lenSq = ab.x * ab.x + ab.y * ab.y;
+    let t = (lenSq === 0) ? 0 : (ap.x * ab.x + ap.y * ab.y) / lenSq;
+
+    // Clamp t to segment
+    t = Math.max(0, Math.min(1, t));
+
+    const closest = { x: a.x + t * ab.x, y: a.y + t * ab.y };
+    const dx = user.x - closest.x;
+    const dy = user.y - closest.y;
+    const distSq = dx * dx + dy * dy;
+
+    if (distSq < minDistance) {
+      minDistance = distSq;
+      bestProgress = i + t;
+    }
+  }
+
+  return bestProgress;
 }
 
 /**

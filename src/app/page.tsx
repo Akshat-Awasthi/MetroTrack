@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Compass, LoaderCircle, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair, MoveRight, MoveLeft } from "lucide-react";
+import { Compass, LoaderCircle, Search, Train, ArrowLeftRight, LocateFixed, ZoomIn, ZoomOut, Crosshair, MoveRight, MoveLeft, RefreshCw } from "lucide-react";
 import { /*usePathname, useRouter, useSearchParams*/ } from "next/navigation";
 
 import { useGeolocation } from "@/hooks/use-geolocation";
@@ -38,26 +38,28 @@ const toMapCoords = (lat: number, lng: number) => {
   const PADDING = 0.05; // 5% padding
   const effectiveWidth = MAP_DIMENSIONS.width * (1 - 2 * PADDING);
   const effectiveHeight = MAP_DIMENSIONS.height * (1 - 2 * PADDING);
-  
+
   const x = (paddingX => paddingX + ((lng - MAP_BOUNDS.minLng) / (MAP_BOUNDS.maxLng - MAP_BOUNDS.minLng)) * effectiveWidth)(MAP_DIMENSIONS.width * PADDING);
   const y = (paddingY => paddingY + ((MAP_BOUNDS.maxLat - lat) / (MAP_BOUNDS.maxLat - MAP_BOUNDS.minLat)) * effectiveHeight)(MAP_DIMENSIONS.height * PADDING);
-  
+
   return { x, y };
 };
 
+const GEOLOCATION_OPTIONS = {
+  enableHighAccuracy: true,
+  timeout: 30000,
+  maximumAge: 0
+};
+
 export default function Home() {
-  const { position, error } = useGeolocation({
-    enableHighAccuracy: true,
-    timeout: 5000,
-    maximumAge: 0
-  });
+  const { position, error, refetch } = useGeolocation(GEOLOCATION_OPTIONS);
   const [closestStation, setClosestStation] = React.useState<Station | null>(null);
-  
+
   // Journey state
   const [fromStationId, setFromStationId] = React.useState<string | null>(null);
   const [toStationId, setToStationId] = React.useState<string | null>(null);
   const [journey, setJourney] = React.useState<{ from: Station; to: Station; route: Station[] } | null>(null);
-  
+
   // Location intent state
   const [isWaitingForLocationToSetFrom, setIsWaitingForLocationToSetFrom] = React.useState(false);
 
@@ -93,7 +95,7 @@ export default function Home() {
       const nearestStation = findNearestStation(position.coords);
       console.log('Home - Nearest station:', nearestStation?.name, nearestStation);
       setClosestStation(nearestStation);
-      
+
       if (isWaitingForLocationToSetFrom && nearestStation) {
         setFromStationId(nearestStation.id);
         setIsWaitingForLocationToSetFrom(false);
@@ -102,7 +104,7 @@ export default function Home() {
   }, [position, isWaitingForLocationToSetFrom]);
 
   // URL sync logic moved to `UrlSearchSync` which is rendered inside a Suspense boundary.
-  
+
   const handleSetNearestStationAsFrom = () => {
     if (position && closestStation) {
       setFromStationId(closestStation.id);
@@ -120,44 +122,44 @@ export default function Home() {
       });
     }
   };
-  
+
   const handleStartJourney = async () => {
     if (fromStationId && toStationId) {
-       const route = findJourneyRoute(fromStationId, toStationId);
-       if(route && route.length > 0) {
-         // Compute an initial nearest station override to show progress
-         // immediately while the continuous watch position may still be
-         // acquiring. Prefer the live `position` if available.
-         if (position) {
-           const initial = findNearestStationOnRoute(position.coords, route);
-           setInitialNearestStation(initial);
-         } else if ('geolocation' in navigator) {
-           // One-shot attempt to get a quick fix; it's asynchronous and may
-           // prompt the user for permission. We'll set the override when it
-           // resolves — the tracker will update accordingly.
-           navigator.geolocation.getCurrentPosition((pos) => {
-             const initial = findNearestStationOnRoute(pos.coords, route);
-             setInitialNearestStation(initial);
-           }, () => {
-             // ignore failure — tracker will fall back to other heuristics
-           });
-         }
-         if ('Notification' in window && Notification.permission !== 'denied') {
-            await Notification.requestPermission();
-         }
-         setJourney({
-           from: stations[fromStationId],
-           to: stations[toStationId],
-           route: route,
-         });
-       } else {
-          toast({
-            variant: "destructive",
-            title: "Route Not Found",
-            description: "Could not find a metro route between the selected stations.",
+      const route = findJourneyRoute(fromStationId, toStationId);
+      if (route && route.length > 0) {
+        // Compute an initial nearest station override to show progress
+        // immediately while the continuous watch position may still be
+        // acquiring. Prefer the live `position` if available.
+        if (position) {
+          const initial = findNearestStationOnRoute(position.coords, route);
+          setInitialNearestStation(initial);
+        } else if ('geolocation' in navigator) {
+          // One-shot attempt to get a quick fix; it's asynchronous and may
+          // prompt the user for permission. We'll set the override when it
+          // resolves — the tracker will update accordingly.
+          navigator.geolocation.getCurrentPosition((pos) => {
+            const initial = findNearestStationOnRoute(pos.coords, route);
+            setInitialNearestStation(initial);
+          }, () => {
+            // ignore failure — tracker will fall back to other heuristics
           });
-          console.error("Could not find a route between the selected stations.");
-       }
+        }
+        if ('Notification' in window && Notification.permission !== 'denied') {
+          await Notification.requestPermission();
+        }
+        setJourney({
+          from: stations[fromStationId],
+          to: stations[toStationId],
+          route: route,
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Route Not Found",
+          description: "Could not find a metro route between the selected stations.",
+        });
+        console.error("Could not find a route between the selected stations.");
+      }
     }
   };
 
@@ -165,7 +167,7 @@ export default function Home() {
     setFromStationId(toStationId);
     setToStationId(fromStationId);
   };
-  
+
   const handleEndJourney = () => {
     setJourney(null);
     setFromStationId(null);
@@ -176,25 +178,25 @@ export default function Home() {
   const handleBackToPlan = () => {
     setJourney(null);
   };
-  
+
   const handleZoom = (zoomFactor: number, clientX?: number, clientY?: number) => {
     if (!mapRef.current) return;
-  
+
     const newScale = Math.max(0.5, Math.min(scale * zoomFactor, 5));
     if (newScale === scale) return;
-  
+
     const mapRect = mapRef.current.getBoundingClientRect();
     const mouseX = (clientX ?? mapRect.width / 2) - mapRect.left;
     const mouseY = (clientY ?? mapRect.height / 2) - mapRect.top;
-  
+
     // Position of the mouse on the map before zoom
     const mapMouseX = (mouseX - translate.x) / scale;
     const mapMouseY = (mouseY - translate.y) / scale;
-  
+
     // New translate to keep the mouse position fixed
     const newTranslateX = mouseX - mapMouseX * newScale;
     const newTranslateY = mouseY - mapMouseY * newScale;
-  
+
     setScale(newScale);
     setTranslate({ x: newTranslateX, y: newTranslateY });
   };
@@ -222,7 +224,7 @@ export default function Home() {
 
   const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsDragging(false);
-     e.currentTarget.style.cursor = 'grab';
+    e.currentTarget.style.cursor = 'grab';
   };
 
   const handleTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
@@ -244,20 +246,20 @@ export default function Home() {
   const handleTouchEnd = () => {
     setIsDragging(false);
   };
-  
+
   const centerOnUser = () => {
     if (userMapPos && mapRef.current) {
-        const mapWidth = mapRef.current.clientWidth;
-        const mapHeight = mapRef.current.clientHeight;
-        const newScale = 2; // Zoom in a bit
-        setScale(newScale);
-        setTranslate({
-            x: -userMapPos.x * newScale + mapWidth / 2,
-            y: -userMapPos.y * newScale + mapHeight / 2,
-        });
+      const mapWidth = mapRef.current.clientWidth;
+      const mapHeight = mapRef.current.clientHeight;
+      const newScale = 2; // Zoom in a bit
+      setScale(newScale);
+      setTranslate({
+        x: -userMapPos.x * newScale + mapWidth / 2,
+        y: -userMapPos.y * newScale + mapHeight / 2,
+      });
     }
   };
-  
+
   const userMapPos = position ? toMapCoords(position.coords.latitude, position.coords.longitude) : null;
 
   // Auto-center on first successful GPS fix (do not repeat on subsequent updates)
@@ -294,7 +296,7 @@ export default function Home() {
     if (mins <= 0) return "<1 min";
     return `${mins} min`;
   };
-  
+
   return (
     <main className="h-[100dvh] w-screen flex flex-col bg-gray-50 dark:bg-gray-950">
       <header className="flex items-center justify-between p-3 bg-background/80 backdrop-blur-sm border-b shadow-sm z-10">
@@ -309,10 +311,13 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-2">
           {position && (
-             <Button variant="outline" size="icon" onClick={centerOnUser}>
+            <Button variant="outline" size="icon" onClick={centerOnUser}>
               <LocateFixed className="h-5 w-5" />
             </Button>
           )}
+          <Button variant="outline" size="icon" onClick={refetch} title="Refresh Location">
+            <RefreshCw className="h-5 w-5" />
+          </Button>
           <Sheet>
             <SheetTrigger asChild>
               <Button variant="outline" size="icon">
@@ -348,7 +353,7 @@ export default function Home() {
         />
       </React.Suspense>
 
-      <div 
+      <div
         ref={mapRef}
         className={cn("flex-1 relative overflow-hidden cursor-grab", journey ? "pointer-events-none" : "pointer-events-auto")}
         onWheel={handleWheel}
@@ -360,25 +365,25 @@ export default function Home() {
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
       >
-         <div className="absolute inset-0 grid grid-cols-20 grid-rows-12">
-            {[...Array(240)].map((_, i) => (
-                <div key={i} className="border border-border/10"></div>
-            ))}
-         </div>
-         
-         <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-2">
-            <Button variant="outline" size="icon" onClick={() => handleZoom(1.2)}>
-                <ZoomIn className="h-5 w-5" />
-            </Button>
-            <Button variant="outline" size="icon" onClick={() => handleZoom(1/1.2)}>
-                <ZoomOut className="h-5 w-5" />
-            </Button>
-         </div>
-        
+        <div className="absolute inset-0 grid grid-cols-20 grid-rows-12">
+          {[...Array(240)].map((_, i) => (
+            <div key={i} className="border border-border/10"></div>
+          ))}
+        </div>
+
+        <div className="absolute bottom-4 right-4 z-10 flex flex-col gap-2">
+          <Button variant="outline" size="icon" onClick={() => handleZoom(1.2)}>
+            <ZoomIn className="h-5 w-5" />
+          </Button>
+          <Button variant="outline" size="icon" onClick={() => handleZoom(1 / 1.2)}>
+            <ZoomOut className="h-5 w-5" />
+          </Button>
+        </div>
+
         <div
           className="absolute top-0 left-0"
-          style={{ 
-            width: MAP_DIMENSIONS.width, 
+          style={{
+            width: MAP_DIMENSIONS.width,
             height: MAP_DIMENSIONS.height,
             transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`,
             transformOrigin: 'top left'
@@ -411,13 +416,13 @@ export default function Home() {
                 />
               );
             })}
-            
+
             {stationEntries.map((station) => {
               const { x, y } = toMapCoords(station.coordinates.lat, station.coordinates.lng);
               const isClosest = closestStation?.id === station.id;
               const isJourneyEndpoint = journey?.from.id === station.id || journey?.to.id === station.id;
               const isPartOfJourney = journey?.route.some(s => s.id === station.id);
-              
+
               const baseFontSize = 7;
               const maxFontSize = 10;
               const minFontSize = 4;
@@ -426,10 +431,10 @@ export default function Home() {
 
               return (
                 <g key={station.id} className={cn(
-                  "transition-opacity", 
+                  "transition-opacity",
                   !journey || isPartOfJourney ? "opacity-100" : "opacity-30"
                 )}>
-                   <circle
+                  <circle
                     cx={x}
                     cy={y}
                     r={isClosest || isJourneyEndpoint ? "5" : "3"}
@@ -437,26 +442,26 @@ export default function Home() {
                     stroke="hsl(var(--foreground))"
                     strokeWidth="1"
                   />
-                   <text
-                      x={x + 4}
-                      y={y + 4}
-                      textAnchor="start"
-                      fontSize={`${fontSize}px`}
-                      className="font-sans font-medium fill-foreground"
-                    >
-                      {station.name}
-                    </text>
+                  <text
+                    x={x + 4}
+                    y={y + 4}
+                    textAnchor="start"
+                    fontSize={`${fontSize}px`}
+                    className="font-sans font-medium fill-foreground"
+                  >
+                    {station.name}
+                  </text>
                 </g>
               );
             })}
-            
+
             {userMapPos && (
-               <g transform={`translate(${userMapPos.x}, ${userMapPos.y})`}>
-                  <circle cx="0" cy="0" r="6" fill="hsl(var(--primary))" opacity="0.8"/>
-                  <circle cx="0" cy="0" r="6" fill="hsl(var(--primary))" stroke="hsl(var(--primary))" strokeWidth="2" strokeOpacity="0.5">
-                      <animate attributeName="r" from="6" to="12" dur="1s" begin="0s" repeatCount="indefinite" />
-                      <animate attributeName="opacity" from="1" to="0" dur="1s" begin="0s" repeatCount="indefinite" />
-                  </circle>
+              <g transform={`translate(${userMapPos.x}, ${userMapPos.y})`}>
+                <circle cx="0" cy="0" r="6" fill="hsl(var(--primary))" opacity="0.8" />
+                <circle cx="0" cy="0" r="6" fill="hsl(var(--primary))" stroke="hsl(var(--primary))" strokeWidth="2" strokeOpacity="0.5">
+                  <animate attributeName="r" from="6" to="12" dur="1s" begin="0s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" from="1" to="0" dur="1s" begin="0s" repeatCount="indefinite" />
+                </circle>
               </g>
             )}
           </svg>
@@ -475,13 +480,13 @@ export default function Home() {
                   onSelect={setFromStationId}
                   placeholder="From Station"
                 />
-                 <Button variant="outline" size="icon" className="shrink-0" onClick={handleSetNearestStationAsFrom} disabled={isWaitingForLocationToSetFrom}>
+                <Button variant="outline" size="icon" className="shrink-0" onClick={handleSetNearestStationAsFrom} disabled={isWaitingForLocationToSetFrom}>
                   {isWaitingForLocationToSetFrom ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Crosshair className="h-4 w-4" />}
                 </Button>
               </div>
               <div className="sm:self-center">
                 <Button variant="ghost" size="icon" className="hidden sm:flex" onClick={handleSwapStations} disabled={!fromStationId && !toStationId}>
-                    <ArrowLeftRight className="h-4 w-4" />
+                  <ArrowLeftRight className="h-4 w-4" />
                 </Button>
               </div>
               <div className="flex-1">
@@ -495,8 +500,8 @@ export default function Home() {
               </div>
             </div>
             <Button className="w-full" onClick={handleStartJourney} disabled={!fromStationId || !toStationId}>
-                <Train className="mr-2 h-4 w-4" />
-                Start Journey
+              <Train className="mr-2 h-4 w-4" />
+              Start Journey
             </Button>
             {!position && !error && !isWaitingForLocationToSetFrom && (
               <div className="flex flex-col items-center justify-center h-full text-muted-foreground py-4">
@@ -515,16 +520,21 @@ export default function Home() {
           </div>
         </div>
       ) : (
-  // Journey full-screen details with a bottom draggable menu for ETA + end journey
-  // Make overlay opaque (no backdrop blur) so the map is not visible/blurred behind it.
-  <div className="fixed inset-0 z-50 bg-background overflow-auto">
+        // Journey full-screen details with a bottom draggable menu for ETA + end journey
+        // Make overlay opaque (no backdrop blur) so the map is not visible/blurred behind it.
+        <div className="fixed inset-0 z-50 bg-background overflow-auto">
           <div className="p-4 pt-6 text-center relative">
             <div className="absolute left-4 top-4">
               <Button variant="ghost" size="icon" className="border" onClick={handleBackToPlan}>
-               <MoveLeft className="h-5 w-5" />
+                <MoveLeft className="h-5 w-5" />
               </Button>
             </div>
             <h2 className="text-lg font-headline">Journey Details</h2>
+            <div className="absolute right-4 top-4">
+              <Button variant="ghost" size="icon" className="border" onClick={refetch} title="Refresh Location">
+                <RefreshCw className="h-5 w-5" />
+              </Button>
+            </div>
           </div>
 
           <div className="px-4">
@@ -546,7 +556,7 @@ export default function Home() {
 
             <div className="mt-4">
               <ScrollArea className="h-[60vh] px-0">
-                <JourneyTracker 
+                <JourneyTracker
                   route={journey.route}
                   currentLocation={position ? position.coords : null}
                   nearestStationOverride={(() => {
